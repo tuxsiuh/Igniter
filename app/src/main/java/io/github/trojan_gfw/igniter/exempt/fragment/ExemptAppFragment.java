@@ -21,6 +21,9 @@ import androidx.recyclerview.widget.DividerItemDecoration;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
+import com.google.android.material.tabs.TabItem;
+import com.google.android.material.tabs.TabLayout;
+
 import java.util.List;
 
 import io.github.trojan_gfw.igniter.R;
@@ -38,6 +41,7 @@ public class ExemptAppFragment extends BaseFragment implements ExemptAppContract
     private RecyclerView mAppRv;
     private AppInfoAdapter mAppInfoAdapter;
     private LoadingDialog mLoadingDialog;
+    private TabLayout mWorkModeTl;
 
     public ExemptAppFragment() {
         // Required empty public constructor
@@ -66,6 +70,7 @@ public class ExemptAppFragment extends BaseFragment implements ExemptAppContract
     private void findViews() {
         mTopBar = findViewById(R.id.exemptAppTopBar);
         mAppRv = findViewById(R.id.exemptAppRv);
+        mWorkModeTl = findViewById(R.id.exemptAppWorkModeTabLayout);
     }
 
     private void initViews() {
@@ -86,6 +91,30 @@ public class ExemptAppFragment extends BaseFragment implements ExemptAppContract
                 mPresenter.updateAppInfo(appInfo, position, exempt);
             }
         });
+        mWorkModeTl.addOnTabSelectedListener(new TabLayout.OnTabSelectedListener() {
+            @Override
+            public void onTabSelected(TabLayout.Tab tab) {
+                if (tab.getPosition() == 0) { // block mode
+                    mPresenter.loadBlockAppListConfig();
+                } else {
+                    mPresenter.loadAllowAppListConfig();
+                }
+            }
+
+            @Override
+            public void onTabUnselected(TabLayout.Tab tab) {
+            }
+
+            @Override
+            public void onTabReselected(TabLayout.Tab tab) {
+            }
+        });
+    }
+
+    @Override
+    public void showAllowAppList(List<AppInfo> packagesNames) {
+        mWorkModeTl.selectTab(mWorkModeTl.getTabAt(1));
+        mAppInfoAdapter.refreshData(packagesNames);
     }
 
     @Override
@@ -154,7 +183,8 @@ public class ExemptAppFragment extends BaseFragment implements ExemptAppContract
     }
 
     @Override
-    public void showAppList(final List<AppInfo> appInfoList) {
+    public void showBlockAppList(final List<AppInfo> appInfoList) {
+        mWorkModeTl.selectTab(mWorkModeTl.getTabAt(0));
         mAppInfoAdapter.refreshData(appInfoList);
     }
 

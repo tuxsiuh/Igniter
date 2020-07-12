@@ -5,8 +5,6 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.CAMERA" />
-    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
-    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
 
     <application xmlns:tools="http://schemas.android.com/tools"
@@ -19,7 +17,7 @@
         android:theme="@style/AppTheme">
         <provider
             android:name=".common.os.PreferencesProvider"
-            android:authorities="io.github.trojan_gfw.igniter"
+            android:authorities="${applicationId}"
             android:enabled="true"
             android:exported="false" />
         <activity

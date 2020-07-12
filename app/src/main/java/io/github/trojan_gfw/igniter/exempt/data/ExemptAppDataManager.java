@@ -7,6 +7,7 @@ import android.os.Build;
 import android.text.TextUtils;
 
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
@@ -35,21 +36,33 @@ import java.util.Set;
  */
 public class ExemptAppDataManager implements ExemptAppDataSource {
     private final PackageManager mPackageManager;
-    private final String mExemptAppListFilePath;
+    private final String mBlockAppListFilePath;
+    private final String mAllowAppListFilePath;
 
-    public ExemptAppDataManager(Context context, String exemptAppListFilePath) {
+    public ExemptAppDataManager(Context context, String blockAppListFilePath,
+                                String allowAppListFilePath) {
         super();
         mPackageManager = context.getPackageManager();
-        mExemptAppListFilePath = exemptAppListFilePath;
+        mBlockAppListFilePath = blockAppListFilePath;
+        mAllowAppListFilePath = allowAppListFilePath;
     }
 
     @Override
-    public void saveExemptAppInfoSet(Set<String> exemptAppPackageNames) {
-        File file = new File(mExemptAppListFilePath);
+    public void saveAllowAppInfoSet(@Nullable Set<String> allowAppPackageNames) {
+        saveAppPackageNameSet(allowAppPackageNames, mAllowAppListFilePath);
+    }
+
+    @Override
+    public void saveBlockAppInfoSet(@Nullable Set<String> blockAppPackageNames) {
+        saveAppPackageNameSet(blockAppPackageNames, mBlockAppListFilePath);
+    }
+
+    private void saveAppPackageNameSet(@Nullable Set<String> packageNameSet, String filePath) {
+        File file = new File(filePath);
         if (file.exists()) {
             file.delete();
         }
-        if (exemptAppPackageNames == null || exemptAppPackageNames.isEmpty()) {
+        if (packageNameSet == null || packageNameSet.isEmpty()) {
             return;
         }
         File dir = file.getParentFile();
@@ -59,7 +72,7 @@ public class ExemptAppDataManager implements ExemptAppDataSource {
         try (FileOutputStream fos = new FileOutputStream(file);
              OutputStreamWriter osw = new OutputStreamWriter(fos);
              BufferedWriter bw = new BufferedWriter(osw)) {
-            for (String name : exemptAppPackageNames) {
+            for (String name : packageNameSet) {
                 bw.write(name);
                 bw.write('\n');
             }
@@ -70,8 +83,8 @@ public class ExemptAppDataManager implements ExemptAppDataSource {
     }
 
     @NonNull
-    private Set<String> readExemptAppListConfig() {
-        File file = new File(mExemptAppListFilePath);
+    private Set<String> readExemptAppListConfig(String filePath) {
+        File file = new File(filePath);
         Set<String> exemptAppSet = new HashSet<>();
         if (!file.exists()) {
             return exemptAppSet;
@@ -91,8 +104,17 @@ public class ExemptAppDataManager implements ExemptAppDataSource {
     }
 
     @Override
-    public Set<String> loadExemptAppPackageNameSet() {
-        Set<String> exemptAppPackageNames = readExemptAppListConfig();
+    public Set<String> loadAllowAppPackageNameSet() {
+        return loadAppPackageNameSet(mAllowAppListFilePath);
+    }
+
+    @Override
+    public Set<String> loadBlockAppPackageNameSet() {
+        return loadAppPackageNameSet(mBlockAppListFilePath);
+    }
+
+    private Set<String> loadAppPackageNameSet(String filePath) {
+        Set<String> exemptAppPackageNames = readExemptAppListConfig(filePath);
         // filter uninstalled apps
         List<ApplicationInfo> applicationInfoList = queryCurrentInstalledApps();
         Set<String> installedAppPackageNames = new HashSet<>();

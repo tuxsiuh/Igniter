@@ -22,10 +22,15 @@ public interface ExemptAppContract {
 
         void filterAppsByName(String name);
 
+        void loadBlockAppListConfig();
+
+        void loadAllowAppListConfig();
+
         void exit();
     }
 
     interface View extends BaseView<Presenter> {
+
         @UiThread
         void showLoading();
 
@@ -39,7 +44,10 @@ public interface ExemptAppContract {
         void showExitConfirm();
 
         @UiThread
-        void showAppList(List<AppInfo> packageNames);
+        void showBlockAppList(List<AppInfo> packageNames);
+
+        @UiThread
+        void showAllowAppList(List<AppInfo> packagesNames);
 
         @AnyThread
         void exit(boolean configurationChanged);

@@ -26,13 +26,11 @@ import org.json.JSONObject;
 
 import java.io.File;
 import java.io.FileInputStream;
-import java.util.Collections;
 import java.util.Set;
 
 import clash.Clash;
 import freeport.Freeport;
 import io.github.trojan_gfw.igniter.common.constants.Constants;
-import io.github.trojan_gfw.igniter.common.utils.PermissionUtils;
 import io.github.trojan_gfw.igniter.common.utils.PreferenceUtils;
 import io.github.trojan_gfw.igniter.connection.TestConnection;
 import io.github.trojan_gfw.igniter.exempt.data.ExemptAppDataManager;
@@ -117,10 +115,20 @@ public class ProxyService extends VpnService implements TestConnection.OnResultL
         @Override
         public void testConnection(String testUrl) {
             if (state != STARTED) {
-                onResult(TUN2SOCKS5_SERVER_HOST, false, 0L, "ProxyService not yet connected.");
+                onResult(TUN2SOCKS5_SERVER_HOST, false, 0L, getString(R.string.proxy_service_not_connected));
                 return;
             }
             new TestConnection(TUN2SOCKS5_SERVER_HOST, tun2socksPort, ProxyService.this).execute(testUrl);
+        }
+
+        @Override
+        public String getProxyHost() throws RemoteException {
+            return TUN2SOCKS5_SERVER_HOST;
+        }
+
+        @Override
+        public long getProxyPort() throws RemoteException {
+            return tun2socksPort;
         }
 
         @Override
@@ -211,15 +219,16 @@ public class ProxyService extends VpnService implements TestConnection.OnResultL
         return super.onBind(intent);
     }
 
-    private Set<String> getExemptAppPackageNames() {
-        if (!PermissionUtils.hasReadWriteExtStoragePermission(this)) {
-            return Collections.emptySet();
-        }
+    private Set<String> getExemptAppPackageNames(boolean allowMode) {
         if (mExemptAppDataSource == null) {
-            mExemptAppDataSource = new ExemptAppDataManager(getApplicationContext(), Globals.getExemptedAppListPath());
+            mExemptAppDataSource = new ExemptAppDataManager(getApplicationContext(),
+                    Globals.getBlockedAppListPath(), Globals.getAllowedAppListPath());
+        }
+        if (allowMode) {
+            return mExemptAppDataSource.loadAllowAppPackageNameSet();
         }
         // ensures that new exempted app list can be applied on proxy after modification.
-        return mExemptAppDataSource.loadExemptAppPackageNameSet();
+        return mExemptAppDataSource.loadBlockAppPackageNameSet();
     }
 
     /**
@@ -257,6 +266,36 @@ public class ProxyService extends VpnService implements TestConnection.OnResultL
                 Constants.PREFERENCE_KEY_ENABLE_CLASH, true);
     }
 
+    /**
+     * Apply allow or disallow rule on application by package names.
+     */
+    private void applyApplicationOrientedRule(VpnService.Builder builder) {
+        boolean workInAllowMode = PreferenceUtils.getBooleanPreference(getContentResolver(),
+                Uri.parse(Constants.PREFERENCE_URI),
+                Constants.PREFERENCE_KEY_PROXY_IN_ALLOW_MODE, false);
+        Set<String> exemptAppPackageNames = getExemptAppPackageNames(workInAllowMode);
+        RuleApplier applier;
+        if (workInAllowMode) {
+            exemptAppPackageNames.remove(getPackageName()); // disallow Igniter
+            applier = Builder::addAllowedApplication;
+        } else {
+            exemptAppPackageNames.add(getPackageName()); // disallow Igniter
+            applier = Builder::addDisallowedApplication;
+        }
+        for (String packageName : exemptAppPackageNames) {
+            try {
+                applier.applyRule(builder, packageName);
+            } catch (PackageManager.NameNotFoundException e) {
+                e.printStackTrace();
+                setState(STOPPED);
+            }
+        }
+    }
+
+    interface RuleApplier {
+        void applyRule(VpnService.Builder builder, String packageName) throws PackageManager.NameNotFoundException;
+    }
+
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         LogHelper.i(TAG, "onStartCommand");
@@ -267,23 +306,9 @@ public class ProxyService extends VpnService implements TestConnection.OnResultL
         startForegroundNotification(getString(R.string.notification_channel_id));
         setState(STARTING);
 
-        Set<String> exemptAppPackageNames = getExemptAppPackageNames();
-
         VpnService.Builder b = new VpnService.Builder();
-        try {
-            b.addDisallowedApplication(getPackageName());
-        } catch (PackageManager.NameNotFoundException e) {
-            e.printStackTrace();
-            setState(STOPPED);
-            // todo: stop foreground notification and return here?
-        }
-        for (String packageName : exemptAppPackageNames) {
-            try {
-                b.addDisallowedApplication(packageName);
-            } catch (PackageManager.NameNotFoundException e) {
-                e.printStackTrace();
-            }
-        }
+        applyApplicationOrientedRule(b);
+
         enable_clash = readClashPreference();
         LogHelper.e(TAG, "enable_clash: " + enable_clash);
         boolean enable_ipv6 = false;
