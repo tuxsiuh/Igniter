@@ -12,15 +12,15 @@ public class TrojanURLHelper {
                     trojanConfig.getRemoteAddr(),
                     trojanConfig.getRemotePort(),
                     null, null, null);
-        } catch (java.net.URISyntaxException e) {
+        } catch (Exception e) {
             e.printStackTrace();
             return null;
         }
 
-        return trojanUri.toString();
+        return trojanUri.toASCIIString();
     }
 
-    public static TrojanConfig ParseTrojanURL(String trojanURLStr) {
+    public static TrojanURLParseResult ParseTrojanURL(String trojanURLStr) {
         URI trojanUri;
         try {
             trojanUri = new URI(trojanURLStr);
@@ -38,10 +38,21 @@ public class TrojanURLHelper {
         int port = trojanUri.getPort();
         String userInfo = trojanUri.getUserInfo();
 
-        TrojanConfig retConfig = new TrojanConfig();
-        retConfig.setRemoteAddr(host);
-        retConfig.setRemotePort(port);
-        retConfig.setPassword(userInfo);
+        TrojanURLParseResult retConfig = new TrojanURLParseResult();
+        retConfig.host = host;
+        retConfig.port = port;
+        retConfig.password = userInfo;
         return retConfig;
+    }
+
+    public static TrojanConfig CombineTrojanURLParseResultToTrojanConfig(TrojanURLParseResult result,
+                                                                         TrojanConfig config) {
+        if (config == null || result == null) {
+            return null;
+        }
+        config.setRemoteAddr(result.host);
+        config.setRemotePort(result.port);
+        config.setPassword(result.password);
+        return config;
     }
 }

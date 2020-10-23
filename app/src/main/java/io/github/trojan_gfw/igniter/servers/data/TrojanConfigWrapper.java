@@ -3,10 +3,12 @@ package io.github.trojan_gfw.igniter.servers.data;
 import androidx.annotation.Nullable;
 
 import io.github.trojan_gfw.igniter.TrojanConfig;
+import io.github.trojan_gfw.igniter.servers.data.ServerListDataManager;
 
 public class TrojanConfigWrapper extends TrojanConfig {
     private final TrojanConfig mDelegate;
     private boolean mSelected;
+    private float mPingDelayTime = ServerListDataManager.SERVER_STATUS_INIT;
 
     public TrojanConfigWrapper(TrojanConfig delegate) {
         mDelegate = delegate;
@@ -72,6 +74,11 @@ public class TrojanConfigWrapper extends TrojanConfig {
     @Override
     public TrojanConfig setRemoteServerRemark(String remoteServerRemark) {
         return mDelegate.setRemoteServerRemark(remoteServerRemark);
+    }
+
+    @Override
+    public String getIdentifier() {
+        return mDelegate.getIdentifier();
     }
 
     @Override
@@ -157,5 +164,13 @@ public class TrojanConfigWrapper extends TrojanConfig {
     @Override
     public boolean equals(@Nullable Object obj) {
         return mDelegate.equals(obj);
+    }
+
+    public float getPingDelayTime() {
+        return mPingDelayTime;
+    }
+
+    public void setPingDelayTime(float pingDelayTime) {
+        this.mPingDelayTime = pingDelayTime;
     }
 }

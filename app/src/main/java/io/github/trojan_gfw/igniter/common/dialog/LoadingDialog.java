@@ -4,6 +4,7 @@ import android.app.Dialog;
 import android.content.Context;
 import android.graphics.Color;
 import android.graphics.PorterDuff;
+import android.graphics.PorterDuffColorFilter;
 import android.graphics.drawable.ColorDrawable;
 import android.view.Window;
 import android.widget.TextView;
@@ -23,14 +24,15 @@ public class LoadingDialog extends Dialog {
     }
 
     private void init(Context context) {
-        Window window =getWindow();
+        Window window = getWindow();
         if (window != null) {
             window.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
         }
         setContentView(R.layout.dialog_loading);
         ContentLoadingProgressBar pb = findViewById(R.id.dialogLoadingPb);
-        pb.getIndeterminateDrawable().setColorFilter(ContextCompat.getColor(context, R.color.colorPrimary),
-                PorterDuff.Mode.MULTIPLY);
+        pb.getIndeterminateDrawable().setColorFilter(
+                new PorterDuffColorFilter(ContextCompat.getColor(context, R.color.colorPrimary),
+                        PorterDuff.Mode.MULTIPLY));
         mMsgTv = findViewById(R.id.dialogLoadingMsgTv);
     }
 

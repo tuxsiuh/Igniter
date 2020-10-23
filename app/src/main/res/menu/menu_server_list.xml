@@ -28,7 +28,7 @@
         app:showAsAction="never" />
 
     <item android:id="@+id/action_exit_batch_operation"
-        android:title="@string/common_cancel"
+        android:title="@string/common_exit"
         android:visible="false"
         app:showAsAction="always" />
 
@@ -46,5 +46,10 @@
         android:title="@string/common_delete"
         app:showAsAction="always"
         android:visible="false" />
+
+    <item android:id="@+id/action_test_all_proxy_server"
+        android:title="@string/server_list_menu_test_all_proxy_server"
+        app:showAsAction="never"
+        android:visible="true"/>
 
 </menu>

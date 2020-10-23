@@ -4,12 +4,14 @@ import android.content.Context;
 import android.net.Uri;
 import android.text.TextUtils;
 
+import androidx.annotation.Nullable;
 import androidx.annotation.UiThread;
 import androidx.annotation.WorkerThread;
 
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 
 import io.github.trojan_gfw.igniter.common.constants.Constants;
@@ -55,7 +57,10 @@ public class ExemptAppPresenter implements ExemptAppContract.Presenter {
     }
 
     @UiThread
-    private void displayAppList(List<AppInfo> appInfoList) {
+    private void displayAppList(@Nullable List<AppInfo> appInfoList) {
+        if (appInfoList == null) {
+            appInfoList = Collections.emptyList();
+        }
         if (mWorkInAllowMode) {
             mView.showAllowAppList(appInfoList);
         } else {
@@ -153,7 +158,7 @@ public class ExemptAppPresenter implements ExemptAppContract.Presenter {
             appInfo.setExempt(packageNameSet.contains(appInfo.getPackageName()));
         }
         Collections.sort(allAppInfoList, AppInfo::compareTo);
-        Threads.instance().runOnUiThread(()->{
+        Threads.instance().runOnUiThread(() -> {
             if (inAllowMode) {
                 mView.showAllowAppList(allAppInfoList);
             } else {

@@ -1,7 +1,6 @@
 package io.github.trojan_gfw.igniter.servers.fragment;
 
 import android.Manifest;
-import android.app.Activity;
 import android.app.Dialog;
 import android.content.Context;
 import android.content.DialogInterface;
@@ -18,6 +17,10 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Toast;
 
+import androidx.activity.result.ActivityResult;
+import androidx.activity.result.ActivityResultCallback;
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AlertDialog;
@@ -27,33 +30,39 @@ import androidx.core.content.ContextCompat;
 import androidx.core.graphics.drawable.DrawableCompat;
 import androidx.fragment.app.FragmentActivity;
 import androidx.recyclerview.widget.DividerItemDecoration;
+import androidx.recyclerview.widget.ItemTouchHelper;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.List;
-import java.util.Objects;
 import java.util.Set;
 
+import io.github.trojan_gfw.igniter.Globals;
 import io.github.trojan_gfw.igniter.R;
 import io.github.trojan_gfw.igniter.TrojanConfig;
 import io.github.trojan_gfw.igniter.common.app.BaseFragment;
 import io.github.trojan_gfw.igniter.common.dialog.LoadingDialog;
 import io.github.trojan_gfw.igniter.common.utils.SnackbarUtils;
 import io.github.trojan_gfw.igniter.qrcode.ScanQRCodeActivity;
+import io.github.trojan_gfw.igniter.servers.ItemVerticalMoveCallback;
 import io.github.trojan_gfw.igniter.servers.SubscribeSettingDialog;
 import io.github.trojan_gfw.igniter.servers.activity.ServerListActivity;
 import io.github.trojan_gfw.igniter.servers.contract.ServerListContract;
 
+import static android.app.Activity.RESULT_OK;
+
 public class ServerListFragment extends BaseFragment implements ServerListContract.View {
-    private static final int FILE_IMPORT_REQUEST_CODE = 120;
-    private static final int SCAN_QR_CODE_REQUEST_CODE = 110;
-    private static final int REQUEST_CAMERA_CODE = 114;
     public static final String TAG = "ServerListFragment";
     public static final String KEY_TROJAN_CONFIG = ServerListActivity.KEY_TROJAN_CONFIG;
+
+    private ActivityResultLauncher<String> scanQRCodeRequestPermissionStartActivityLaunch;
+    private ActivityResultLauncher<String> importConfigStartActivityLaunch;
+    private ActivityResultLauncher<Intent> scanQRCodeGotResultStartActivityLaunch;
+
     private ServerListContract.Presenter mPresenter;
     private RecyclerView mServerListRv;
+    private ItemTouchHelper mItemTouchHelper;
     private ServerListAdapter mServerListAdapter;
     private Dialog mImportConfigDialog;
     private Dialog mLoadingDialog;
@@ -65,6 +74,44 @@ public class ServerListFragment extends BaseFragment implements ServerListContra
 
     public static ServerListFragment newInstance() {
         return new ServerListFragment();
+    }
+
+    @Override
+    public void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        scanQRCodeRequestPermissionStartActivityLaunch = registerForActivityResult(new ActivityResultContracts.RequestPermission(),
+                new ActivityResultCallback<Boolean>() {
+                    @Override
+                    public void onActivityResult(Boolean result) {
+                        if (result) {
+                            scanQRCodeGotResultStartActivityLaunch.launch(ScanQRCodeActivity.create(mContext, false));
+                        } else {
+                            Toast.makeText(mContext.getApplicationContext(), R.string.server_list_lack_of_camera_permission, Toast.LENGTH_SHORT).show();
+                        }
+                    }
+                });
+
+        importConfigStartActivityLaunch = registerForActivityResult(new ActivityResultContracts.GetContent(),
+                new ActivityResultCallback<Uri>() {
+                    @Override
+                    public void onActivityResult(Uri uri) {
+                        if (uri != null) {
+                            mPresenter.parseConfigsInFileStream(getContext(), uri);
+                        }
+                    }
+                });
+
+        scanQRCodeGotResultStartActivityLaunch = registerForActivityResult(new ActivityResultContracts.StartActivityForResult(),
+                new ActivityResultCallback<ActivityResult>() {
+                    @Override
+                    public void onActivityResult(ActivityResult result) {
+                        if (result.getResultCode() == RESULT_OK) {
+                            Intent data = result.getData();
+                            if (data == null) return;
+                            mPresenter.addServerConfig(data.getStringExtra(ScanQRCodeActivity.KEY_SCAN_CONTENT));
+                        }
+                    }
+                });
     }
 
     @Override
@@ -90,12 +137,13 @@ public class ServerListFragment extends BaseFragment implements ServerListContra
     private void initViews() {
         FragmentActivity activity = getActivity();
         if (activity instanceof AppCompatActivity) {
-            ((AppCompatActivity) activity).setSupportActionBar((Toolbar)findViewById(R.id.toolbar));
+            ((AppCompatActivity) activity).setSupportActionBar((Toolbar) findViewById(R.id.toolbar));
             setHasOptionsMenu(true);
         }
         mServerListRv.setLayoutManager(new LinearLayoutManager(mContext, LinearLayoutManager.VERTICAL, false));
         mServerListRv.addItemDecoration(new DividerItemDecoration(mContext, DividerItemDecoration.VERTICAL));
         mServerListAdapter = new ServerListAdapter(getContext(), new ArrayList<TrojanConfig>());
+        mItemTouchHelper = new ItemTouchHelper(new ItemVerticalMoveCallback(mServerListAdapter));
         mServerListRv.setAdapter(mServerListAdapter);
     }
 
@@ -141,41 +189,25 @@ public class ServerListFragment extends BaseFragment implements ServerListContra
     }
 
     @Override
-    public void gotoScanQRCode() {
+    public void askTheWayToScanQRCode() {
+        new AlertDialog.Builder(mContext)
+                .setItems(R.array.scan_qr_code_choices,
+                        (dialog, which) -> mPresenter.gotoScanQRCode(1 == which))
+                .show();
+    }
+
+    @Override
+    public void scanQRCodeFromCamera() {
         if (PackageManager.PERMISSION_GRANTED == ContextCompat.checkSelfPermission(mContext, Manifest.permission.CAMERA)) {
-            gotoScanQRCodeInner();
+            scanQRCodeGotResultStartActivityLaunch.launch(ScanQRCodeActivity.create(mContext, false));
         } else {
-            requestPermissions(new String[]{Manifest.permission.CAMERA}, REQUEST_CAMERA_CODE);
-        }
-    }
-
-    private void gotoScanQRCodeInner() {
-        startActivityForResult(ScanQRCodeActivity.create(mContext), SCAN_QR_CODE_REQUEST_CODE);
-    }
-
-    @Override
-    public void onActivityResult(int requestCode, int resultCode, Intent data) {
-        super.onActivityResult(requestCode, resultCode, data);
-        if (SCAN_QR_CODE_REQUEST_CODE == requestCode && resultCode == Activity.RESULT_OK && data != null) {
-            mPresenter.addServerConfig(data.getStringExtra(ScanQRCodeActivity.KEY_SCAN_CONTENT));
-        } else if (FILE_IMPORT_REQUEST_CODE == requestCode && resultCode == Activity.RESULT_OK && data != null) {
-            Uri uri = data.getData();
-            if (uri != null) {
-                mPresenter.parseConfigsInFileStream(getContext(), uri);
-            }
+            scanQRCodeRequestPermissionStartActivityLaunch.launch(Manifest.permission.CAMERA);
         }
     }
 
     @Override
-    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
-        if (REQUEST_CAMERA_CODE == requestCode) {
-            if (PackageManager.PERMISSION_GRANTED == grantResults[0]) {
-                gotoScanQRCodeInner();
-            } else {
-                Toast.makeText(getContext(), R.string.server_list_lack_of_camera_permission, Toast.LENGTH_SHORT).show();
-            }
-        }
+    public void scanQRCodeFromGallery() {
+        scanQRCodeGotResultStartActivityLaunch.launch(ScanQRCodeActivity.create(mContext, true));
     }
 
     @Override
@@ -184,7 +216,7 @@ public class ServerListFragment extends BaseFragment implements ServerListContra
         if (activity != null) {
             Intent intent = new Intent();
             intent.putExtra(KEY_TROJAN_CONFIG, config);
-            activity.setResult(Activity.RESULT_OK, intent);
+            activity.setResult(RESULT_OK, intent);
             activity.finish();
         }
     }
@@ -243,6 +275,7 @@ public class ServerListFragment extends BaseFragment implements ServerListContra
         menu.findItem(R.id.action_select_all_servers).setVisible(mBatchOperationMode);
         menu.findItem(R.id.action_deselect_all_servers).setVisible(mBatchOperationMode);
         menu.findItem(R.id.action_batch_delete_servers).setVisible(mBatchOperationMode);
+        menu.findItem(R.id.action_test_all_proxy_server).setVisible(!mBatchOperationMode);
         // Tint scan QRCode icon to white.
         if (qrCodeItem.getIcon() != null) {
             Drawable drawable = qrCodeItem.getIcon();
@@ -268,6 +301,7 @@ public class ServerListFragment extends BaseFragment implements ServerListContra
         mBatchOperationMode = enable;
         requireActivity().invalidateOptionsMenu();
         mServerListAdapter.setBatchDeleteMode(enable);
+        mItemTouchHelper.attachToRecyclerView(enable ? mServerListRv : null);
     }
 
     @Override
@@ -279,7 +313,7 @@ public class ServerListFragment extends BaseFragment implements ServerListContra
     public boolean onOptionsItemSelected(MenuItem item) {
         switch (item.getItemId()) {
             case R.id.action_scan_qr_code:
-                mPresenter.gotoScanQRCode();
+                askTheWayToScanQRCode();
                 return true;
             case R.id.action_import_from_file:
                 mPresenter.displayImportFileDescription();
@@ -291,6 +325,7 @@ public class ServerListFragment extends BaseFragment implements ServerListContra
                 mPresenter.batchOperateServerList();
                 return true;
             case R.id.action_exit_batch_operation:
+                mPresenter.saveServerList(mServerListAdapter.getData());
                 mPresenter.exitServerListBatchOperation();
                 return true;
             case R.id.action_select_all_servers:
@@ -308,6 +343,9 @@ public class ServerListFragment extends BaseFragment implements ServerListContra
             case R.id.action_subscribe_servers:
                 mPresenter.updateSubscribeServers();
                 return true;
+            case R.id.action_test_all_proxy_server:
+                mPresenter.pingAllProxyServer(mServerListAdapter.getData());
+                return true;
             default:
                 break;
         }
@@ -318,6 +356,8 @@ public class ServerListFragment extends BaseFragment implements ServerListContra
     public void showLoading() {
         if (mLoadingDialog == null) {
             mLoadingDialog = new LoadingDialog(mContext);
+            mLoadingDialog.setCancelable(false);
+            mLoadingDialog.setCanceledOnTouchOutside(false);
         }
         mLoadingDialog.show();
     }
@@ -372,10 +412,7 @@ public class ServerListFragment extends BaseFragment implements ServerListContra
 
     @Override
     public void openFileChooser() {
-        Intent intent = new Intent()
-                .setType("text/plain")
-                .setAction(Intent.ACTION_GET_CONTENT);
-        startActivityForResult(Intent.createChooser(intent, getString(R.string.server_list_file_chooser_msg)), FILE_IMPORT_REQUEST_CODE);
+        importConfigStartActivityLaunch.launch("*/*");
     }
 
     @Override
@@ -383,7 +420,7 @@ public class ServerListFragment extends BaseFragment implements ServerListContra
         mRootView.post(new Runnable() {
             @Override
             public void run() {
-                Toast.makeText(getApplicationContext(), getString(R.string.export_server_list_success), Toast.LENGTH_SHORT).show();
+                Toast.makeText(getApplicationContext(), getString(R.string.export_server_list_success, Globals.getIgniterExportPath()), Toast.LENGTH_LONG).show();
             }
         });
     }
@@ -421,5 +458,10 @@ public class ServerListFragment extends BaseFragment implements ServerListContra
     @Override
     public void setPresenter(ServerListContract.Presenter presenter) {
         mPresenter = presenter;
+    }
+
+    @Override
+    public void setPingServerDelayTime(TrojanConfig config, float timeout) {
+        mServerListAdapter.setPingServerDelayTime(config, timeout);
     }
 }
