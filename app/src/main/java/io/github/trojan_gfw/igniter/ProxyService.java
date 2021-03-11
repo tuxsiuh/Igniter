@@ -72,6 +72,7 @@ public class ProxyService extends VpnService implements TestConnection.OnResultL
     public static final int IGNITER_STATUS_NOTIFY_MSG_ID = 114514;
     public long tun2socksPort;
     public boolean enable_clash = false;
+    public boolean allowLan = false;
 
     @IntDef({STATE_NONE, STARTING, STARTED, STOPPING, STOPPED})
     public @interface ProxyState {
@@ -82,7 +83,11 @@ public class ProxyService extends VpnService implements TestConnection.OnResultL
     //private static final String PRIVATE_VLAN4_ROUTER = "172.19.0.2";
     private static final String PRIVATE_VLAN6_CLIENT = "fdfe:dcba:9876::1";
     //private static final String PRIVATE_VLAN6_ROUTER = "fdfe:dcba:9876::2";
-    private static final String TUN2SOCKS5_SERVER_HOST = "127.0.0.1";
+    private static final String TUN2SOCKS5_SERVER_HOST_LOOPBACK_v4 = "127.0.0.1";
+    private static final String TUN2SOCKS5_SERVER_HOST_LOOPBACK_v6 = "[::1]";
+    private static final String TUN2SOCKS5_SERVER_CLASH_HOST_ANY = "*"; // Clash syntax
+    private static final String TUN2SOCKS5_SERVER_HOST_ANY_v4 = "0.0.0.0";
+    private static final String TUN2SOCKS5_SERVER_HOST_ANY_v6 = "[::]";
     private @ProxyState
     int state = STATE_NONE;
     private ParcelFileDescriptor pfd;
@@ -120,16 +125,16 @@ public class ProxyService extends VpnService implements TestConnection.OnResultL
         @Override
         public void testConnection(String testUrl) {
             if (state != STARTED) {
-                onResult(TUN2SOCKS5_SERVER_HOST, false, 0L, getString(R.string.proxy_service_not_connected));
+                onResult(TUN2SOCKS5_SERVER_HOST_LOOPBACK_v4, false, 0L, getString(R.string.proxy_service_not_connected));
                 return;
             }
-            new Thread(() -> new TestConnection(TUN2SOCKS5_SERVER_HOST, tun2socksPort,
+            new Thread(() -> new TestConnection(TUN2SOCKS5_SERVER_HOST_LOOPBACK_v4, tun2socksPort,
                     new TestConnectionCallback(ProxyService.this)).testLatency(testUrl)).start();
         }
 
         @Override
         public String getProxyHost() {
-            return TUN2SOCKS5_SERVER_HOST;
+            return TUN2SOCKS5_SERVER_HOST_LOOPBACK_v4;
         }
 
         @Override
@@ -273,6 +278,11 @@ public class ProxyService extends VpnService implements TestConnection.OnResultL
                 Constants.PREFERENCE_KEY_ENABLE_CLASH, true);
     }
 
+    private boolean readAllowLanPreference() {
+        return PreferenceUtils.getBooleanPreference(getContentResolver(), Uri.parse(Constants.PREFERENCE_URI),
+                Constants.PREFERENCE_KEY_ALLOW_LAN, false);
+    }
+
     /**
      * Apply allow or disallow rule on application by package names.
      */
@@ -333,6 +343,8 @@ public class ProxyService extends VpnService implements TestConnection.OnResultL
 
         enable_clash = readClashPreference();
         LogHelper.e(TAG, "enable_clash: " + enable_clash);
+        allowLan = readAllowLanPreference();
+        LogHelper.e(TAG, "allowLan: " + allowLan);
 
         TrojanConfig ins = TrojanHelper.readTrojanConfig(Globals.getTrojanConfigPath());
         assert ins != null;
@@ -342,8 +354,15 @@ public class ProxyService extends VpnService implements TestConnection.OnResultL
 
         b.setSession(getString(R.string.app_name));
         b.setMtu(VPN_MTU);
+
+        // Address settings
         b.addAddress(PRIVATE_VLAN4_CLIENT, 30);
+        if (enable_ipv6) {
+            b.addAddress(PRIVATE_VLAN6_CLIENT, 126);
+        }
+
         if (enable_clash) {
+            // Bypass LAN/China mode
             for (String route : getResources().getStringArray(R.array.bypass_private_route)) {
                 String[] parts = route.split("/", 2);
                 b.addRoute(parts[0], Integer.parseInt(parts[1]));
@@ -351,14 +370,18 @@ public class ProxyService extends VpnService implements TestConnection.OnResultL
             // fake ip range for go-tun2socks
             // should match clash configuration
             b.addRoute("198.18.0.0", 16);
+            // https://issuetracker.google.com/issues/149636790
+            if (enable_ipv6) {
+                b.addRoute("2000::", 3);
+            }
         } else {
+            // Global mode
             b.addRoute("0.0.0.0", 0);
+            if (enable_ipv6) {
+                b.addRoute("::", 0);
+            }
         }
 
-        if (enable_ipv6) {
-            b.addAddress(PRIVATE_VLAN6_CLIENT, 126);
-            b.addRoute("::", 0);
-        }
         b.addDnsServer("8.8.8.8");
         b.addDnsServer("8.8.4.4");
         b.addDnsServer("1.1.1.1");
@@ -406,7 +429,12 @@ public class ProxyService extends VpnService implements TestConnection.OnResultL
                 ClashStartOptions clashStartOptions = new ClashStartOptions();
                 clashStartOptions.setHomeDir(getFilesDir().toString());
                 clashStartOptions.setTrojanProxyServer("127.0.0.1:" + trojanPort);
-                clashStartOptions.setSocksListener("127.0.0.1:" + clashSocksPort);
+                if (allowLan) {
+                    // Clash specific syntax for any address
+                    clashStartOptions.setSocksListener("*:" + clashSocksPort);
+                } else {
+                    clashStartOptions.setSocksListener("127.0.0.1:" + clashSocksPort);
+                }
                 clashStartOptions.setTrojanProxyServerUdpEnabled(true);
                 Clash.start(clashStartOptions);
                 LogHelper.i("Clash", "clash started");
@@ -419,22 +447,35 @@ public class ProxyService extends VpnService implements TestConnection.OnResultL
         }
         LogHelper.i("igniter", "tun2socks port is " + tun2socksPort);
 
-        // debug/info/warn/error/none
+        String socks5ServerAddrPort;
+        if (allowLan) {
+            socks5ServerAddrPort = TUN2SOCKS5_SERVER_HOST_ANY_v4+ ":" + tun2socksPort;
+        } else {
+            socks5ServerAddrPort = TUN2SOCKS5_SERVER_HOST_LOOPBACK_v4 + ":" + tun2socksPort;
+        }
+
         Tun2socksStartOptions tun2socksStartOptions = new Tun2socksStartOptions();
         tun2socksStartOptions.setTunFd(fd);
-        tun2socksStartOptions.setSocks5Server(TUN2SOCKS5_SERVER_HOST + ":" + tun2socksPort);
+        tun2socksStartOptions.setSocks5Server(socks5ServerAddrPort);
         tun2socksStartOptions.setEnableIPv6(enable_ipv6);
+        tun2socksStartOptions.setAllowLan(allowLan);
         tun2socksStartOptions.setMTU(VPN_MTU);
 
-        Tun2socks.setLoglevel("info");
+        // debug/info/warn/error/none
+        if (BuildConfig.DEBUG || BuildConfig.VERSION_NAME.contains("SNAPSHOT")) {
+            Tun2socks.setLoglevel("debug");
+        } else {
+            Tun2socks.setLoglevel("info");
+        }
+
         if (enable_clash) {
             tun2socksStartOptions.setFakeIPRange("198.18.0.1/16");
         } else {
             // Disable go-tun2socks fake ip
             tun2socksStartOptions.setFakeIPRange("");
         }
-        Tun2socks.start(tun2socksStartOptions);
         LogHelper.i(TAG, tun2socksStartOptions.toString());
+        Tun2socks.start(tun2socksStartOptions);
 
         setState(STARTED);
 

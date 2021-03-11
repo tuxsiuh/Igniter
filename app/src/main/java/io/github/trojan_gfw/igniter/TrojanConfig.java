@@ -6,6 +6,8 @@ import android.text.TextUtils;
 
 import androidx.annotation.Nullable;
 
+import com.google.gson.Gson;
+
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -50,6 +52,7 @@ public class TrojanConfig implements Parcelable {
                 + "TLS_CHACHA20_POLY1305_SHA256:"
                 + "TLS_AES_256_GCM_SHA384";
         this.SNI = "";
+        this.caCertPath = Globals.getCaCertPath();
     }
 
     protected TrojanConfig(Parcel in) {
@@ -306,19 +309,7 @@ public class TrojanConfig implements Parcelable {
 
     @Override
     public String toString() {
-        return "TrojanConfig{" +
-                "localAddr='" + localAddr + '\'' +
-                ", localPort=" + localPort +
-                ", remoteAddr='" + remoteAddr + '\'' +
-                ", remoteServerRemark='" + remoteServerRemark + '\'' +
-                ", remotePort=" + remotePort +
-                ", password='" + password + '\'' +
-                ", verifyCert=" + verifyCert +
-                ", caCertPath='" + caCertPath + '\'' +
-                ", enableIpv6=" + enableIpv6 +
-                ", cipherList='" + cipherList + '\'' +
-                ", tls13CipherList='" + tls13CipherList + '\'' +
-                ", SNI='" + SNI + '\'' +
-                '}';
+        Gson gson = new Gson();
+        return gson.toJson(this);
     }
 }
