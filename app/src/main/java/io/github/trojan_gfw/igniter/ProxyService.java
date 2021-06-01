@@ -27,7 +27,11 @@ import androidx.annotation.IntDef;
 import androidx.annotation.NonNull;
 import androidx.core.app.NotificationCompat;
 
+import org.json.JSONException;
+import org.json.JSONObject;
+
 import java.lang.ref.WeakReference;
+import java.util.List;
 import java.util.Set;
 
 import clash.Clash;
@@ -40,6 +44,7 @@ import io.github.trojan_gfw.igniter.exempt.data.ExemptAppDataManager;
 import io.github.trojan_gfw.igniter.exempt.data.ExemptAppDataSource;
 import io.github.trojan_gfw.igniter.proxy.aidl.ITrojanService;
 import io.github.trojan_gfw.igniter.proxy.aidl.ITrojanServiceCallback;
+import io.github.trojan_gfw.igniter.settings.data.SettingsDataManager;
 import tun2socks.Tun2socks;
 import tun2socks.Tun2socksStartOptions;
 
@@ -64,13 +69,15 @@ import tun2socks.Tun2socksStartOptions;
  */
 public class ProxyService extends VpnService implements TestConnection.OnResultListener {
     private static final String TAG = "ProxyService";
+    public static final String STATE_MSG_KEY_PORT = "port";
     public static final int STATE_NONE = -1;
     public static final int STARTING = 0;
     public static final int STARTED = 1;
     public static final int STOPPING = 2;
     public static final int STOPPED = 3;
     public static final int IGNITER_STATUS_NOTIFY_MSG_ID = 114514;
-    public long tun2socksPort;
+    private static final long INVALID_PORT = -1L;
+    public long tun2socksPort = INVALID_PORT;
     public boolean enable_clash = false;
     public boolean allowLan = false;
 
@@ -163,6 +170,9 @@ public class ProxyService extends VpnService implements TestConnection.OnResultL
     private void setState(int state) {
         LogHelper.i(TAG, "setState: " + state);
         this.state = state;
+        if (STOPPED == state || STOPPING == state) {
+            tun2socksPort = INVALID_PORT;
+        }
         notifyStateChange();
     }
 
@@ -190,11 +200,23 @@ public class ProxyService extends VpnService implements TestConnection.OnResultL
      * Broadcast the state change event by invoking callbacks from other processes or services.
      */
     private void notifyStateChange() {
-        int state = this.state;
+        final int state = this.state;
+        String msg;
+        if (STARTING == state || STARTED == state) {
+            JSONObject jsonObject = new JSONObject();
+            try {
+                jsonObject.put(STATE_MSG_KEY_PORT, tun2socksPort);
+            } catch (JSONException e) {
+                e.printStackTrace();
+            }
+            msg = jsonObject.toString();
+        } else {
+            msg = "{\"msg\":\"state changed\"}";
+        }
         for (int i = mCallbackList.beginBroadcast() - 1; i >= 0; i--) {
             try {
                 // the second String parameter is currently useless. Might be the url of the profile.
-                mCallbackList.getBroadcastItem(i).onStateChanged(state, "state changed");
+                mCallbackList.getBroadcastItem(i).onStateChanged(state, msg);
             } catch (RemoteException e) {
                 e.printStackTrace();
             }
@@ -313,6 +335,15 @@ public class ProxyService extends VpnService implements TestConnection.OnResultL
         void applyRule(VpnService.Builder builder, String packageName) throws PackageManager.NameNotFoundException;
     }
 
+    private void addExtraDNS(VpnService.Builder b) {
+        SettingsDataManager dataManager = new SettingsDataManager(this);
+        List<String> dnsList = dataManager.loadExtraDNSList();
+        for (String dns : dnsList) {
+            LogHelper.i(TAG, "add DnsServer: " + dns);
+            b.addDnsServer(dns);
+        }
+    }
+
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         LogHelper.i(TAG, "onStartCommand");
@@ -325,6 +356,7 @@ public class ProxyService extends VpnService implements TestConnection.OnResultL
 
         VpnService.Builder b = new VpnService.Builder();
         applyApplicationOrientedRule(b);
+        addExtraDNS(b);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             // VPN apps targeting {@link android.os.Build.VERSION_CODES#Q} or above will be
             // considered metered by default, because of which Google Play Store treat the network
@@ -482,7 +514,7 @@ public class ProxyService extends VpnService implements TestConnection.OnResultL
         Intent openMainActivityIntent = new Intent(this, MainActivity.class);
         openMainActivityIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
         PendingIntent pendingOpenMainActivityIntent = PendingIntent.getActivity(this, 0, openMainActivityIntent, 0);
-        String igniterRunningStatusStr = "listening on port: " + tun2socksPort;
+        String igniterRunningStatusStr = getString(R.string.notification_listen_port, String.valueOf(tun2socksPort));
         final String channelId = getString(R.string.notification_channel_id);
         NotificationCompat.Builder builder = new NotificationCompat.Builder(this, channelId)
                 .setSmallIcon(R.drawable.ic_tile)

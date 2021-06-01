@@ -30,11 +30,14 @@ import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
+import androidx.annotation.UiThread;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 
+import org.json.JSONException;
+import org.json.JSONObject;
+
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 
@@ -51,15 +54,13 @@ import io.github.trojan_gfw.igniter.proxy.aidl.ITrojanService;
 import io.github.trojan_gfw.igniter.servers.activity.ServerListActivity;
 import io.github.trojan_gfw.igniter.servers.data.ServerListDataManager;
 import io.github.trojan_gfw.igniter.servers.data.ServerListDataSource;
+import io.github.trojan_gfw.igniter.settings.activity.SettingsActivity;
 import io.github.trojan_gfw.igniter.tile.ProxyHelper;
 
 
 public class MainActivity extends AppCompatActivity implements TrojanConnection.Callback {
     private static final String TAG = "MainActivity";
-    private static final int READ_WRITE_EXT_STORAGE_PERMISSION_REQUEST = 514;
-    private static final int VPN_REQUEST_CODE = 233;
-    private static final int SERVER_LIST_CHOOSE_REQUEST_CODE = 1024;
-    private static final int EXEMPT_APP_CONFIGURE_REQUEST_CODE = 2077;
+    private static final long INVALID_PORT = -1L;
     private static final String CONNECTION_TEST_URL = "https://www.google.com";
 
     private String shareLink;
@@ -73,10 +74,11 @@ public class MainActivity extends AppCompatActivity implements TrojanConnection.
     private Switch verifySwitch;
     private Switch clashSwitch;
     private Switch allowLanSwitch;
-    private Button startStopButton;
+    private Button startStopButton, copyPortBtn;
     private EditText trojanURLText;
     private @ProxyService.ProxyState
     int proxyState = ProxyService.STATE_NONE;
+    private long currentProxyPort;
     private final TrojanConnection connection = new TrojanConnection(false);
     private final Object lock = new Object();
     private volatile ITrojanService trojanService;
@@ -321,6 +323,7 @@ public class MainActivity extends AppCompatActivity implements TrojanConnection.
         clashSwitch = findViewById(R.id.clashSwitch);
         allowLanSwitch = findViewById(R.id.allowLanSwitch);
         startStopButton = findViewById(R.id.startStopButton);
+        copyPortBtn = findViewById(R.id.copyPortBtn);
 
         copyRawResourceToDir(R.raw.cacert, Globals.getCaCertPath(), true);
         copyRawResourceToDir(R.raw.country, Globals.getCountryMmdbPath(), true);
@@ -499,6 +502,14 @@ public class MainActivity extends AppCompatActivity implements TrojanConnection.
             }
         });
         horseIv.setOnTouchListener((v, event) -> gestureDetector.onTouchEvent(event));
+        copyPortBtn.setOnClickListener(v-> {
+            ClipboardManager cm = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+            String portStr = String.valueOf(currentProxyPort);
+            ClipData data = ClipData.newPlainText("port", portStr);
+            cm.setPrimaryClip(data);
+            SnackbarUtils.showTextShort(rootViewGroup,
+                    getString(R.string.main_proxy_port_copied_to_clipboard, portStr));
+        });
     }
 
     private void swayTheHorse() {
@@ -554,6 +565,17 @@ public class MainActivity extends AppCompatActivity implements TrojanConnection.
         });
     }
 
+    @UiThread
+    private void updatePortInfo(long port) {
+        currentProxyPort = port;
+        if (port >= 0L && port <= 65535) {
+            copyPortBtn.setText(getString(R.string.notification_listen_port, String.valueOf(port)));
+            copyPortBtn.setVisibility(View.VISIBLE);
+        } else {
+            copyPortBtn.setVisibility(View.INVISIBLE);
+        }
+    }
+
     @Override
     public void onServiceConnected(final ITrojanService service) {
         LogHelper.i(TAG, "onServiceConnected");
@@ -565,10 +587,13 @@ public class MainActivity extends AppCompatActivity implements TrojanConnection.
             public void onRun() {
                 try {
                     final int state = service.getState();
-                    runOnUiThread(new Runnable() {
-                        @Override
-                        public void run() {
-                            updateViews(state);
+                    final long port = service.getProxyPort();
+                    runOnUiThread(() -> {
+                        updateViews(state);
+                        if (ProxyService.STARTED == state || ProxyService.STARTING == state) {
+                            updatePortInfo(port);
+                        } else {
+                            updatePortInfo(INVALID_PORT);
                         }
                     });
                 } catch (RemoteException e) {
@@ -580,16 +605,24 @@ public class MainActivity extends AppCompatActivity implements TrojanConnection.
 
     @Override
     public void onServiceDisconnected() {
-        LogHelper.i(TAG, "onServiceConnected");
+        LogHelper.i(TAG, "onServiceDisconnected");
         synchronized (lock) {
             trojanService = null;
         }
+        runOnUiThread(()-> updatePortInfo(INVALID_PORT));
     }
 
     @Override
     public void onStateChanged(int state, String msg) {
         LogHelper.i(TAG, "onStateChanged# state: " + state + " msg: " + msg);
         updateViews(state);
+        try {
+            JSONObject msgJson = new JSONObject(msg);
+            long port = msgJson.optLong(ProxyService.STATE_MSG_KEY_PORT, INVALID_PORT);
+            updatePortInfo(port);
+        } catch (JSONException e) {
+            e.printStackTrace();
+        }
     }
 
     @Override
@@ -732,6 +765,9 @@ public class MainActivity extends AppCompatActivity implements TrojanConnection.
                 return true;
             case R.id.action_exempt_app:
                 exemptAppSettingsActivityResultLauncher.launch(ExemptAppActivity.create(this));
+                return true;
+            case R.id.action_settings:
+                startActivity(SettingsActivity.create(this));
                 return true;
             default:
                 // Invoke the superclass to handle it.
